@@ -1,4 +1,4 @@
-import hickle as hkl
+import hickle as hkl            #pip install hickle
 import numpy as np
 from keras import backend as K
 from keras.preprocessing.image import Iterator
@@ -23,7 +23,7 @@ class SequenceGenerator(Iterator):
             self.X = np.transpose(self.X, (0, 3, 1, 2))
         self.im_shape = self.X[0].shape
 
-        if self.sequence_start_mode == 'all':  # allow for any possible sequence, starting from any frame
+        if self.sequence_start_mode == 'all':  # allow for any possible sequence, starting from any frame如果视频中任意一帧都可以作为起点，只需要确定加上序列长度后的小片段终点是否还属于同一个视频就可以
             self.possible_starts = np.array([i for i in range(self.X.shape[0] - self.nt) if self.sources[i] == self.sources[i + self.nt - 1]])
         elif self.sequence_start_mode == 'unique':  #create sequences where each unique frame is in at most one sequence
             curr_location = 0
@@ -40,7 +40,7 @@ class SequenceGenerator(Iterator):
             self.possible_starts = np.random.permutation(self.possible_starts)
         if N_seq is not None and len(self.possible_starts) > N_seq:  # select a subset of sequences if want to
             self.possible_starts = self.possible_starts[:N_seq]
-        self.N_sequences = len(self.possible_starts)
+        self.N_sequences = len(self.possible_starts)    #所有可能的训练片段数
         super(SequenceGenerator, self).__init__(len(self.possible_starts), batch_size, shuffle, seed)
 
     def next(self):

@@ -19,8 +19,27 @@ from prednet import PredNet
 from data_utils import SequenceGenerator
 from kitti_settings import *
 
+def make_gif(images1, images2,fname, duration=2, true_image=False):
+  import moviepy.editor as mpy
 
-n_plot = 40
+  def make_frame(t):
+    assert len(images1)==len(images2 ),'len(images1) must equal len(images2) '
+    try:
+      x1 = images1[int(len(images1)/duration*t)]
+      x2 = images2[int(len(images2) / duration * t)]
+      x = np.concatenate((x1,x2))
+    except:
+      x = images1[-1]
+
+    if true_image:
+      return x.astype(np.uint8)
+    else:
+      return ((x+1)/2*255).astype(np.uint8)
+
+  clip = mpy.VideoClip(make_frame, duration=duration)
+  clip.write_gif(fname, fps = len(images1) / duration)
+
+n_plot = 20
 batch_size = 10
 nt = 10
 
@@ -71,17 +90,23 @@ gs.update(wspace=0., hspace=0.)
 plot_save_dir = os.path.join(RESULTS_SAVE_DIR, 'prediction_plots/')
 if not os.path.exists(plot_save_dir): os.mkdir(plot_save_dir)
 plot_idx = np.random.permutation(X_test.shape[0])[:n_plot]
+# for i in plot_idx:
+#     for t in range(nt):
+#         plt.subplot(gs[t])
+#         plt.imshow(X_test[i,t], interpolation='none')
+#         plt.tick_params(axis='both', which='both', bottom='off', top='off', left='off', right='off', labelbottom='off', labelleft='off')
+#         if t==0: plt.ylabel('Actual', fontsize=10)
+#
+#         plt.subplot(gs[t + nt])
+#         plt.imshow(X_hat[i,t], interpolation='none')
+#         plt.tick_params(axis='both', which='both', bottom='off', top='off', left='off', right='off', labelbottom='off', labelleft='off')
+#         if t==0: plt.ylabel('Predicted', fontsize=10)
+#
+#     plt.savefig(plot_save_dir +  'plot_' + str(i) + '.png')
+#     plt.clf()
+gif_save_dir = os.path.join(RESULTS_SAVE_DIR, 'prediction_gifs/')
+if not os.path.exists(gif_save_dir): os.mkdir(gif_save_dir)
 for i in plot_idx:
-    for t in range(nt):
-        plt.subplot(gs[t])
-        plt.imshow(X_test[i,t], interpolation='none')
-        plt.tick_params(axis='both', which='both', bottom='off', top='off', left='off', right='off', labelbottom='off', labelleft='off')
-        if t==0: plt.ylabel('Actual', fontsize=10)
+  make_gif(X_test[i],X_hat[i],gif_save_dir+str(i)+'gt.gif',nt)
 
-        plt.subplot(gs[t + nt])
-        plt.imshow(X_hat[i,t], interpolation='none')
-        plt.tick_params(axis='both', which='both', bottom='off', top='off', left='off', right='off', labelbottom='off', labelleft='off')
-        if t==0: plt.ylabel('Predicted', fontsize=10)
 
-    plt.savefig(plot_save_dir +  'plot_' + str(i) + '.png')
-    plt.clf()

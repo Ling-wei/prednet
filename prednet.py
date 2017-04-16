@@ -69,7 +69,7 @@ class PredNet(Recurrent):
                  dim_ordering=K.image_dim_ordering(), **kwargs):
         self.stack_sizes = stack_sizes
         self.nb_layers = len(stack_sizes)
-        assert len(R_stack_sizes) == self.nb_layers, 'len(R_stack_sizes) must equal len(stack_sizes)'
+        assert len(R_stack_sizes) == self.nb_layers, 'len(R_stack_sizes) must equal len(stack_sizes)'  # assert语句，用于确保R部层数与A部一样
         self.R_stack_sizes = R_stack_sizes
         assert len(A_filt_sizes) == (self.nb_layers - 1), 'len(A_filt_sizes) must equal len(stack_sizes) - 1'
         self.A_filt_sizes = A_filt_sizes
@@ -94,7 +94,7 @@ class PredNet(Recurrent):
         else:
             self.output_layer_type = None
             self.output_layer_num = None
-        self.extrap_start_time = extrap_start_time
+        self.extrap_start_time = extrap_start_time      # 推断起始时刻
 
         assert dim_ordering in {'tf', 'th'}, 'dim_ordering must be in {tf, th}'
         self.dim_ordering = dim_ordering
@@ -102,17 +102,18 @@ class PredNet(Recurrent):
         self.row_axis = -2 if dim_ordering == 'th' else -3
         self.column_axis = -1 if dim_ordering == 'th' else -2
 
-        super(PredNet, self).__init__(**kwargs)
-        self.input_spec = [InputSpec(ndim=5)]
+        super(PredNet, self).__init__(**kwargs)         # 什么用？？
+        self.input_spec = [InputSpec(ndim=5)]           # 什么用？？
 
+    # 自己写的层需要实现这个方法，用以keras自动推断shape
     def get_output_shape_for(self, input_shape):
-        if self.output_mode == 'prediction':
+        if self.output_mode == 'prediction':            # 预测模式输出为图像
             out_shape = input_shape[2:]
-        elif self.output_mode == 'error':
+        elif self.output_mode == 'error':               # error模式输出为各层误差，每层一个标量即可
             out_shape = (self.nb_layers,)
         elif self.output_mode == 'all':
             out_shape = (np.prod(input_shape[2:]) + self.nb_layers,)
-        else:
+        else:                                            # 其他情况，可以用来观测R、E单元输出等，没仔细看
             stack_str = 'R_stack_sizes' if self.output_layer_type == 'R' else 'stack_sizes'
             stack_mult = 2 if self.output_layer_type == 'E' else 1
             out_stack_size = stack_mult * getattr(self, stack_str)[self.output_layer_num]
@@ -126,8 +127,8 @@ class PredNet(Recurrent):
         if self.return_sequences:
             return (input_shape[0], input_shape[1]) + out_shape
         else:
-            return (input_shape[0],) + out_shape
-
+            return (input_shape[0],) + out_shape    # input_shape[0]是batch_size
+    # 初始化自己写的LSTM层，各状态量初始化为0
     def get_initial_states(self, x):
         input_shape = self.input_spec[0].shape
         init_nb_row = input_shape[self.row_axis]
@@ -182,14 +183,16 @@ class PredNet(Recurrent):
         self.conv_layers = {c: [] for c in ['i', 'f', 'c', 'o', 'a', 'ahat']}
 
         for l in range(self.nb_layers):
-            for c in ['i', 'f', 'c', 'o']:
+            # R Unit
+            for c in ['i', 'f', 'c', 'o']:          # f i o 是lstm中的门对应的激活函数是sigmoid,c是状态量，激活函数tanh
                 act = self.LSTM_activation if c == 'c' else self.LSTM_inner_activation
+                # 每个sigma门是一个卷积层，输入参数（num_filters,kernel_size,kernel_size）
                 self.conv_layers[c].append(Convolution2D(self.R_stack_sizes[l], self.R_filt_sizes[l], self.R_filt_sizes[l], border_mode='same', activation=act, dim_ordering=self.dim_ordering))
-
+            # Ahat Unit
             act = 'relu' if l == 0 else self.A_activation
             self.conv_layers['ahat'].append(Convolution2D(self.stack_sizes[l], self.Ahat_filt_sizes[l], self.Ahat_filt_sizes[l], border_mode='same', activation=act, dim_ordering=self.dim_ordering))
 
-            if l < self.nb_layers - 1:
+            if l < self.nb_layers - 1:              # A前面接一个卷积层，共num_layers-1层，num_filters与其A层对应
                 self.conv_layers['a'].append(Convolution2D(self.stack_sizes[l+1], self.A_filt_sizes[l], self.A_filt_sizes[l], border_mode='same', activation=self.A_activation, dim_ordering=self.dim_ordering))
 
         self.upsample = UpSampling2D(dim_ordering=self.dim_ordering)
@@ -199,13 +202,13 @@ class PredNet(Recurrent):
         nb_row, nb_col = (input_shape[-2], input_shape[-1]) if self.dim_ordering == 'th' else (input_shape[-3], input_shape[-2])
         for c in sorted(self.conv_layers.keys()):
             for l in range(len(self.conv_layers[c])):
-                ds_factor = 2 ** l
+                ds_factor = 2 ** l                      # 下采样缩放因子
                 if c == 'ahat':
-                    nb_channels = self.R_stack_sizes[l]
+                    nb_channels = self.R_stack_sizes[l] # Ahat的卷积层输入特征数是对应层R的特征数
                 elif c == 'a':
-                    nb_channels = 2 * self.R_stack_sizes[l]
+                    nb_channels = 2 * self.R_stack_sizes[l] # A卷积层输入特征数是对应层E的特征数,E包含（Ahat-A)(A-Ahat)两部分
                 else:
-                    nb_channels = self.stack_sizes[l] * 2 + self.R_stack_sizes[l]
+                    nb_channels = self.stack_sizes[l] * 2 + self.R_stack_sizes[l] # R的输入特征数：E，R_t-1,R_l+1特征数之和
                     if l < self.nb_layers - 1:
                         nb_channels += self.R_stack_sizes[l+1]
                 in_shape = (input_shape[0], nb_channels, nb_row // ds_factor, nb_col // ds_factor)
@@ -213,7 +216,7 @@ class PredNet(Recurrent):
                 self.conv_layers[c][l].build(in_shape)
                 self.trainable_weights += self.conv_layers[c][l].trainable_weights
 
-        if self.initial_weights is not None:
+        if self.initial_weights is not None:          # keras2.0中改成_initial_weights
             self.set_weights(self.initial_weights)
             del self.initial_weights
 
@@ -222,8 +225,8 @@ class PredNet(Recurrent):
         if self.extrap_start_time is not None:
             self.t_extrap = K.variable(self.extrap_start_time, int)
 
-    def step(self, a, states):
-        r_tm1 = states[:self.nb_layers]
+    def step(self, a, states):              # 重载rnn中的step
+        r_tm1 = states[:self.nb_layers]                     # 读取输入的R、E、C（上时刻状态）
         c_tm1 = states[self.nb_layers:2*self.nb_layers]
         e_tm1 = states[2*self.nb_layers:3*self.nb_layers]
 
@@ -234,29 +237,29 @@ class PredNet(Recurrent):
         c = []
         r = []
         e = []
-
-        for l in reversed(range(self.nb_layers)):
+        # R Unit
+        for l in reversed(range(self.nb_layers)):           # 由于R的计算需要前时刻和高一层的R，因此需要由上向下进行计算
             inputs = [r_tm1[l], e_tm1[l]]
             if l < self.nb_layers - 1:
-                inputs.append(r_up)
-
-            inputs = K.concatenate(inputs, axis=self.channel_axis)
-            i = self.conv_layers['i'][l].call(inputs)
+                inputs.append(r_up)                         # 除了最高层，前面的输入都是R_t-1,R_l+1,E,以及隐含的状态C
+            # 标准LSTM过程
+            inputs = K.concatenate(inputs, axis=self.channel_axis)  # 把各个特征图放到一起
+            i = self.conv_layers['i'][l].call(inputs)       # 按照相应的卷积门尺寸卷积
             f = self.conv_layers['f'][l].call(inputs)
             o = self.conv_layers['o'][l].call(inputs)
-            _c = f * c_tm1[l] + i * self.conv_layers['c'][l].call(inputs)
-            _r = o * self.LSTM_activation(_c)
+            _c = f * c_tm1[l] + i * self.conv_layers['c'][l].call(inputs)   # c_t = f*c_t-1 + i*tanh(inputs)
+            _r = o * self.LSTM_activation(_c)                               # r_t = o*tanh(c_t)
             c.insert(0, _c)
             r.insert(0, _r)
 
             if l > 0:
-                r_up = self.upsample.call(_r)
+                r_up = self.upsample.call(_r)                       # 上采样
 
         for l in range(self.nb_layers):
-            ahat = self.conv_layers['ahat'][l].call(r[l])
+            ahat = self.conv_layers['ahat'][l].call(r[l])           # Ahat是R的卷积
             if l == 0:
-                ahat = K.minimum(ahat, self.pixel_max)
-                frame_prediction = ahat
+                ahat = K.minimum(ahat, self.pixel_max)              # 第一层，Ahat限幅，准备作为输出图像
+                frame_prediction = ahat                             # 当output_mode == 'prediction'时输出
 
             # compute errors
             e_up = self.error_activation(ahat - a)
@@ -283,7 +286,7 @@ class PredNet(Recurrent):
                 output = frame_prediction
             else:
                 for l in range(self.nb_layers):
-                    layer_error = K.mean(K.batch_flatten(e[l]), axis=-1, keepdims=True)
+                    layer_error = K.mean(K.batch_flatten(e[l]), axis=-1, keepdims=True)     # 各层平均误差，每层一个数
                     all_error = layer_error if l == 0 else K.concatenate((all_error, layer_error), axis=-1)
                 if self.output_mode == 'error':
                     output = all_error
